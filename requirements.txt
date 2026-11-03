@@ -1,0 +1,15 @@
+# Pinned to the versions verified in this project's virtual environment.
+#
+# Rule-based mode (AGENT_MODE=local): python-dotenv
+# Ollama mode (AGENT_MODE=ollama):    python-dotenv, requests, urllib3
+# Foundry mode (AGENT_MODE=foundry):  all of the below
+#
+# Ollama itself is not a Python package: install it from https://ollama.com
+# and run `ollama pull qwen3:4b`. Tests use the standard-library unittest.
+python-dotenv==1.2.4
+requests==2.34.2
+# Installed with requests; listed because app/ollama_agent.py imports it directly.
+urllib3==2.8.0
+azure-ai-projects==2.10.0
+azure-identity==1.27.0
+openai==3.42.1

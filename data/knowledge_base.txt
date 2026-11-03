@@ -1,0 +1,99 @@
+# React Fundamentals
+
+## Components
+React components are reusable functions that return JSX describing the UI. Prefer function components over class components. Name components in PascalCase (for example UserCard) so JSX treats them as components rather than HTML tags. Keep components small and focused on one responsibility.
+
+## Props
+Props are read-only inputs passed from a parent component to a child component, like function arguments. A component must never modify its own props. Pass data down with props and pass callbacks (for example onSave) when a child needs to notify its parent.
+
+## State and useState
+The useState hook adds local state to a function component: const [count, setCount] = useState(0). Calling the setter schedules a re-render. When the new value depends on the previous value use the updater form: setCount(prev => prev + 1). Never mutate state objects or arrays directly; create new copies with the spread operator.
+
+## useEffect Hook
+The useEffect hook runs side effects such as data fetching, subscriptions and timers after render. The dependency array controls when it re-runs: [] runs once after mount, [userId] re-runs when userId changes, and omitting the array runs after every render. Return a cleanup function to cancel subscriptions, clear timers or abort fetch requests with AbortController. Missing dependencies cause stale values; objects created during render cause infinite loops.
+
+## Lists and Keys
+When rendering a list with map(), give each element a stable, unique key prop such as a database id. Avoid using the array index as the key when items can be reordered, inserted or deleted, because React may reuse the wrong component state.
+
+## Conditional Rendering
+Render conditionally with the ternary operator (isLoading ? <Spinner /> : <List />) or logical AND (hasError && <ErrorMessage />). Be careful with && and numbers: {count && <Badge />} renders 0 when count is 0; use {count > 0 && <Badge />} instead.
+
+## Custom Hooks
+A custom hook is a function whose name starts with use and which calls other hooks, for example useFetch or useLocalStorage. Custom hooks let components share stateful logic without sharing state. Hooks must be called at the top level of a component or hook, never inside loops, conditions or nested functions.
+
+# TypeScript Fundamentals
+
+## Basic Types
+TypeScript adds static types to JavaScript. Common types are string, number, boolean, arrays (string[]), tuples ([string, number]), unknown, any and void. Prefer unknown over any for values of uncertain type, because unknown forces you to narrow the type before using it. Enable "strict": true in tsconfig.json.
+
+## Interfaces and Type Aliases
+Use an interface or a type alias to describe the shape of an object: interface User { id: number; name: string; email?: string }. The question mark marks an optional property. Interfaces can be extended and merged; type aliases can also express unions, intersections and mapped types.
+
+## Union Types and Narrowing
+A union type allows one of several types: type Status = "idle" | "loading" | "error". Narrow a union with typeof, instanceof, the in operator or a discriminant property (for example kind: "circle" | "square") before using type-specific members.
+
+## Generics
+Generics let functions and types work with many types while staying type-safe: function first<T>(items: T[]): T | undefined. Constrain generics with extends, for example <T extends { id: number }>. Common generic utility types include Partial<T>, Required<T>, Pick<T, K>, Omit<T, K> and Record<K, V>.
+
+## Typing React Components
+Type React props with an interface: interface ButtonProps { label: string; onClick: () => void }. Then write function Button({ label, onClick }: ButtonProps). Type state when the initial value is not enough, for example useState<User | null>(null). Type event handlers with React.ChangeEvent<HTMLInputElement> or React.FormEvent<HTMLFormElement>.
+
+# REST API Concepts
+
+## REST Basics
+REST APIs expose resources at URLs and use HTTP methods to act on them. GET reads, POST creates, PUT replaces, PATCH partially updates and DELETE removes. Use plural nouns for resources (/users, /users/42) rather than verbs in URLs. GET, PUT and DELETE should be idempotent.
+
+## HTTP Status Codes
+200 OK means success, 201 Created means a resource was created, 204 No Content means success with no body. 400 Bad Request means invalid input, 401 Unauthorized means missing or invalid authentication, 403 Forbidden means authenticated but not allowed, 404 Not Found means the resource does not exist, 409 Conflict means a state conflict, and 429 Too Many Requests means you are rate limited. 500 Internal Server Error and 503 Service Unavailable are server-side failures.
+
+## API Authentication
+Common API authentication methods are API keys sent in a header, OAuth 2.0 bearer tokens (Authorization: Bearer <token>) and Microsoft Entra ID tokens for Azure services. Never hard-code credentials in source code or commit them to Git; load them from environment variables or a secret store such as Azure Key Vault. Always use HTTPS.
+
+## Calling APIs from Python
+Use the requests library to call REST APIs from Python: response = requests.get(url, params={"page": 1}, timeout=10). Always set a timeout. Call response.raise_for_status() to turn HTTP 4xx and 5xx responses into exceptions, then parse JSON with response.json(). Catch requests.exceptions.RequestException for network errors.
+
+## Calling APIs from JavaScript
+Use fetch in the browser or Node.js: const res = await fetch(url, { headers: { "Content-Type": "application/json" } }). fetch does not throw on HTTP errors, so check res.ok before calling res.json(). Use an AbortController to cancel requests and to implement timeouts.
+
+## Pagination and Rate Limiting
+APIs return large collections in pages using query parameters such as page and pageSize, offset and limit, or an opaque continuation token. When an API responds with 429 Too Many Requests, respect the Retry-After header and retry with exponential backoff.
+
+# Python Basics
+
+## Virtual Environments
+Create an isolated environment per project with python -m venv .venv. Activate it on Windows PowerShell with .venv\Scripts\Activate.ps1 and on macOS or Linux with source .venv/bin/activate. Install packages with pip install and record them with pip freeze > requirements.txt. Never commit the .venv folder.
+
+## Functions and Type Hints
+Define functions with def and add type hints for readability and tooling: def greet(name: str) -> str. Use default argument values for optional parameters, but never use a mutable default such as a list; use None and create the list inside the function.
+
+## Lists, Dictionaries and Comprehensions
+Lists are ordered and mutable, tuples are ordered and immutable, sets hold unique values and dictionaries map keys to values. List comprehensions create lists concisely: squares = [n * n for n in range(10) if n % 2 == 0]. Use dict.get(key, default) to avoid KeyError.
+
+## Exception Handling
+Handle errors with try, except, else and finally. Catch specific exceptions such as ValueError or FileNotFoundError rather than a bare except. Use raise ... from exc to keep the original cause. Use the with statement to close files and other resources automatically.
+
+## Modules and Packages
+A module is a .py file and a package is a folder of modules, usually with an __init__.py file. Run a module inside a package with python -m package.module so imports resolve from the project root. Use if __name__ == "__main__": to run code only when a file is executed directly.
+
+## Environment Variables and dotenv
+Read configuration with os.environ.get("NAME", "default"). The python-dotenv package loads values from a .env file with load_dotenv(). Add .env to .gitignore and commit a .env.example file with placeholder values instead.
+
+# Frontend Troubleshooting
+
+## CORS Errors
+A CORS error such as "blocked by CORS policy: No 'Access-Control-Allow-Origin' header" means the browser blocked a cross-origin request because the server did not allow your origin. Fix it on the server by returning Access-Control-Allow-Origin for your frontend origin and handling OPTIONS preflight requests. During development you can use a dev server proxy (for example the Vite server.proxy option). CORS cannot be fixed from frontend code alone.
+
+## Blank Page After Build or Deploy
+A blank page usually means a JavaScript error during startup. Open the browser developer tools Console tab to read the error. Common causes are a wrong base path for assets, missing environment variables at build time, client-side routes returning 404 on refresh (configure the server to fall back to index.html) and calling methods on undefined data.
+
+## Undefined Property Errors
+"Cannot read properties of undefined (reading 'map')" means the code accessed a property before the data existed, often while an API request is still loading. Initialize state with a safe default such as an empty array, render a loading state, or use optional chaining (data?.items) and nullish coalescing (value ?? fallback).
+
+## Infinite Re-render Loops
+"Too many re-renders" or a useEffect that runs forever usually comes from setting state during render, or from a useEffect whose dependency array contains an object or function recreated on every render. Move state updates into event handlers or effects, and stabilise dependencies with useMemo or useCallback.
+
+## Module Not Found Errors
+"Module not found" or "Cannot find module" errors mean an import path or package is wrong. Check the spelling and letter case of the path (Linux servers are case-sensitive), run npm install, delete node_modules and the lock file and reinstall if dependencies are corrupted, and verify path aliases in tsconfig.json match the bundler configuration.
+
+## Debugging Network Requests
+Use the browser developer tools Network tab to inspect requests: check the URL, method, status code, request headers, payload and response body. A 401 or 403 indicates an authentication problem, a 404 a wrong URL, and a request stuck as pending a server or network issue.

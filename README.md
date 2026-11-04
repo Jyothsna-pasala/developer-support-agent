@@ -69,13 +69,21 @@ foundry-agent-project/
 │   ├── tools.py            3 tools, JSON schemas, validation, executor
 │   ├── config.py           .env loading and validation (now includes Ollama)
 │   ├── conversation.py     Shared types: history, replies, backend protocol
-│   └── foundry_agent.py    Microsoft Foundry backend (needs Azure)
+│   ├── foundry_agent.py    Microsoft Foundry backend (needs Azure)
+│   └── api/                REST API (FastAPI), see section 11
+│       ├── __main__.py     `python -m app.api`: starts uvicorn
+│       ├── main.py         create_app(), routes, CORS, error mapping
+│       ├── sessions.py     Thread-safe sessions, per-session locks, turn limit
+│       ├── schemas.py      Pydantic request/response models
+│       └── settings.py     API_* environment settings
 ├── data/knowledge_base.txt Sample developer knowledge base (30 articles)
 ├── tests/
-│   ├── fake_ollama.py               Scripted fake Ollama HTTP server   (new)
-│   ├── test_ollama_agent.py         Unit tests: tool loop (fake client) (new)
+│   ├── fake_ollama.py               Scripted fake Ollama HTTP server
+│   ├── test_ollama_agent.py         Unit tests: tool loop (fake client)
 │   ├── test_ollama_integration.py   Integration: HTTP, streaming, fallback, CLI
 │   ├── test_ollama_live.py          Opt-in: real qwen3:4b must call each tool
+│   ├── test_api.py                  REST API over HTTP (local + fake Ollama)
+│   ├── test_api_sessions.py         Session manager, concurrency, API settings
 │   ├── test_tools.py, test_agent.py, test_config.py, test_foundry_agent.py
 ├── .env / .env.example, .gitignore, requirements.txt, README.md
 ```
@@ -214,7 +222,10 @@ python -m app.agent                  # Ollama LLM (default); falls back to rules
 python -m app.agent --mode local     # rule-based only, no LLM
 python -m app.agent --mode ollama    # force Ollama mode regardless of .env
 
-python -m unittest discover -s tests -t . -v   # 101 tests, no Ollama or Azure needed
+python -m app.api                    # REST API on http://127.0.0.1:8000 (section 11)
+python -m app.api --mode local       # REST API with the rule-based backend only
+
+python -m unittest discover -s tests -t . -v   # 144 tests, no Ollama or Azure needed
 
 $env:OLLAMA_LIVE_TESTS = "1"                     # opt-in: real model, slow
 python -m unittest tests.test_ollama_live -v
@@ -327,7 +338,7 @@ server variable often holds a bind address such as `0.0.0.0`.
 
 ## 8. Tests
 
-`python -m unittest discover -s tests -t . -v` runs 101 tests in about 15 seconds. They need **no Ollama, no Azure and no internet**.
+`python -m unittest discover -s tests -t . -v` runs 144 tests in about 25 seconds. They need **no Ollama, no Azure and no internet**.
 The 5 live tests are skipped unless `OLLAMA_LIVE_TESTS=1`.
 
 | File | What it covers |
@@ -339,6 +350,8 @@ The 5 live tests are skipped unless `OLLAMA_LIVE_TESTS=1`.
 | `test_agent.py` | Rule-based backend, orchestrator, CLI |
 | `test_config.py` | Configuration validation for all modes |
 | `test_foundry_agent.py` | Foundry request shapes with fake clients |
+| `test_api.py` | REST API over real HTTP (uvicorn in a thread + `requests`): full session flow, validation, 404/409/503, CORS, Swagger, model-driven tool call and fallback via `fake_ollama.py`, Foundry refused, `python -m app.api` startup |
+| `test_api_sessions.py` | Session manager without HTTP: isolation, expiry, limits, busy sessions, queue timeout (backend never called), delete during a turn; `API_*` settings validation |
 
 The default suite mocks the model, so it proves the **plumbing** is correct.
 `test_ollama_live.py` checks that the real model actually calls the tools.
@@ -377,3 +390,181 @@ OpenAPI tools, tracing and evaluations.
 - Tool errors returned to the model never include stack traces; details go to `logs/agent.log`.
 - The log contains user questions and tool arguments, so treat it as local data.
 - Ollama listens on localhost by default. Don't point `OLLAMA_BASE_URL` at an untrusted server.
+- The REST API has **no authentication**. It binds to `127.0.0.1` by default; don't expose it on a network (see section 11).
+
+---
+
+## 11. REST API (FastAPI)
+
+The same agent is available over HTTP. Each API session gets its own
+`DeveloperSupportAgent`, built by the unchanged `create_backend()`, so Ollama
+tool calling, the rule-based fallback, the tools and the history limits work
+exactly as in the CLI. The CLI is unchanged.
+
+> **Local development only.** Authentication is **not implemented**. The API
+> listens on `127.0.0.1` by default, so only your machine can reach it. If you
+> set `API_HOST` to another address, anyone who can reach it can use the agent
+> (a warning is logged).
+
+Supported modes: `ollama` and `local`. **Foundry mode is not supported by the
+API** (it would create an Azure agent version per session); `python -m app.api`
+refuses it, and Foundry stays available in the CLI.
+
+### 11.1 Start the API
+
+```powershell
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt      # adds fastapi and uvicorn
+
+python -m app.api                    # mode from .env (ollama by default)
+python -m app.api --mode local       # rule-based backend, no LLM
+python -m app.api --port 8080        # --host / --port override API_HOST / API_PORT
+
+# Equivalent with the uvicorn CLI (reads mode and API_* from .env):
+uvicorn app.api.main:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Run **one worker only**: sessions are kept in memory in the server process.
+Stop the server with Ctrl+C; open sessions are closed on shutdown.
+
+### 11.2 Swagger / OpenAPI
+
+- Swagger UI: <http://127.0.0.1:8000/docs> (try every endpoint in the browser)
+- ReDoc: <http://127.0.0.1:8000/redoc>
+- OpenAPI schema: <http://127.0.0.1:8000/openapi.json>
+
+### 11.3 Endpoints
+
+| Method | Path | Success | Description |
+|---|---|---|---|
+| `GET` | `/health` | 200 | Mode, model, active sessions and limits. Does not contact Ollama |
+| `GET` | `/tools` | 200 | The three tools with their input JSON schemas |
+| `POST` | `/sessions` | 201 | Start a conversation. In `ollama` mode the model is checked first |
+| `POST` | `/sessions/{session_id}/messages` | 200 | Run one agent turn (can take minutes on a CPU) |
+| `GET` | `/sessions/{session_id}/history` | 200 | The session transcript, oldest first |
+| `POST` | `/sessions/{session_id}/reset` | 204 | Clear the transcript and model context; the session stays open |
+| `DELETE` | `/sessions/{session_id}` | 204 | Close the session (a running turn finishes first) |
+
+Errors use FastAPI's `{"detail": "..."}` body:
+
+| Status | When |
+|---|---|
+| `404` | Unknown, deleted or expired session |
+| `409` | The session is still processing a request (one turn per session at a time) |
+| `422` | Invalid body: missing/non-string `message`, empty, or over 2000 characters |
+| `503` | Model busy past `API_QUEUE_TIMEOUT_SECONDS`, session limit reached (both with `Retry-After`), or Ollama unavailable with `OLLAMA_FALLBACK_TO_RULES=false` |
+
+If Ollama is down when a session is created and fallback is enabled, the
+session uses the rule-based backend; the `backend` field tells you which one.
+If Ollama fails during a turn, that reply starts with `[LLM unavailable: ...]`,
+as in the CLI.
+
+### 11.4 Examples (actual output, `qwen3:4b` on Ollama 0.40.13)
+
+Use `curl.exe` in Windows PowerShell (plain `curl` is an alias there), or
+`Invoke-RestMethod`.
+
+```powershell
+curl.exe -s http://127.0.0.1:8000/health
+```
+```json
+{"status":"ok","agent":"Developer Support Agent","mode":"ollama","model":"qwen3:4b",
+ "active_sessions":0,"max_sessions":20,"max_concurrent_turns":1}
+```
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/sessions
+```
+```json
+{"session_id":"a027ba84d7cc475f9026edd47bac4256",
+ "backend":"Ollama local LLM (qwen3:4b); rule-based fallback enabled",
+ "created_at":"2026-11-04T12:17:58.661957+05:30"}
+```
+
+```powershell
+$sid = "a027ba84d7cc475f9026edd47bac4256"
+Invoke-RestMethod -Method Post "http://127.0.0.1:8000/sessions/$sid/messages" `
+  -ContentType "application/json" -Body '{"message": "Calculate (1200 * 0.18) + 50"}' `
+  -TimeoutSec 600 | ConvertTo-Json -Depth 6
+```
+```json
+{
+  "session_id": "a027ba84d7cc475f9026edd47bac4256",
+  "reply": "The result of `(1200 * 0.18) + 50` is **266**.",
+  "tool_calls": [
+    {
+      "name": "calculate_expression",
+      "arguments": {"expression": "(1200 * 0.18) + 50"},
+      "ok": true,
+      "output": {"tool": "calculate_expression", "ok": true,
+                 "result": {"expression": "(1200 * 0.18) + 50", "result": 266}}
+    }
+  ],
+  "backend": "Ollama local LLM (qwen3:4b); rule-based fallback enabled"
+}
+```
+
+That turn took 134 s on the CPU-only test laptop; the model chose the tool
+itself. A second request to the same session during that time returned:
+
+```json
+409 {"detail":"This session is still processing a previous request. Wait for it to finish."}
+```
+
+```powershell
+curl.exe -s http://127.0.0.1:8000/sessions/$sid/history
+```
+```json
+{"session_id":"a027ba84d7cc475f9026edd47bac4256","messages":[
+ {"role":"user","content":"Calculate (1200 * 0.18) + 50","timestamp":"..."},
+ {"role":"tool","content":"calculate_expression({\"expression\": \"(1200 * 0.18) + 50\"}) -> ok","timestamp":"..."},
+ {"role":"assistant","content":"The result of `(1200 * 0.18) + 50` is **266**.","timestamp":"..."}]}
+```
+
+```powershell
+curl.exe -s -X POST   http://127.0.0.1:8000/sessions/$sid/reset   # 204
+curl.exe -s -X DELETE http://127.0.0.1:8000/sessions/$sid         # 204
+```
+
+Set your HTTP client's timeout to several minutes: a `qwen3:4b` turn on a
+CPU takes 1–5 minutes.
+
+### 11.5 Concurrency and sessions
+
+- **One turn per session.** A second request while a turn runs gets `409`
+  instead of interleaving with it, which would corrupt the model context.
+  `history` and `reset` also return `409` during a turn.
+- **Global turn limit** (`API_MAX_CONCURRENT_TURNS`, default 1). Extra turns
+  wait in a queue for up to `API_QUEUE_TIMEOUT_SECONDS`, then get `503`. The
+  wait happens **before** any request is sent to Ollama, so queued time never
+  counts against `OLLAMA_TIMEOUT_SECONDS` and cannot trigger a false
+  "Ollama sent nothing" fallback.
+- **Expiry:** sessions idle for `API_SESSION_TTL_SECONDS` are closed; at most
+  `API_MAX_SESSIONS` are open at once. Busy sessions never expire mid-turn.
+- Endpoints are synchronous and run in FastAPI's thread pool, so a long turn
+  never blocks other requests such as `/health`.
+
+### 11.6 API configuration (`.env`)
+
+The agent settings from section 7 (`AGENT_MODE`, `OLLAMA_*`, `MAX_HISTORY_MESSAGES`, ...) apply unchanged. The API adds:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `API_HOST` | `127.0.0.1` | Bind address. Keep it on loopback: there is no authentication |
+| `API_PORT` | `8000` | TCP port (1–65535) |
+| `API_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Exact browser origins allowed (Vite/React dev server). Comma-separated; `*` is rejected |
+| `API_SESSION_TTL_SECONDS` | `1800` | Idle time before a session is closed (60–86400) |
+| `API_MAX_SESSIONS` | `20` | Maximum open sessions (1–1000) |
+| `API_MAX_CONCURRENT_TURNS` | `1` | Agent turns running at once (1–32). Raise only if Ollama has `OLLAMA_NUM_PARALLEL` > 1 and enough RAM |
+| `API_QUEUE_TIMEOUT_SECONDS` | `300` | Maximum wait for a free turn slot before `503` (0–3600) |
+
+From a React app on `http://localhost:5173`:
+
+```javascript
+const res = await fetch(`http://127.0.0.1:8000/sessions/${sessionId}/messages`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ message: "How do I fix a CORS error?" }),
+});
+const { reply, tool_calls } = await res.json();
+```

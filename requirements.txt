@@ -2,7 +2,8 @@
 #
 # Rule-based mode (AGENT_MODE=local): python-dotenv
 # Ollama mode (AGENT_MODE=ollama):    python-dotenv, requests, urllib3
-# Foundry mode (AGENT_MODE=foundry):  all of the below
+# Foundry mode (AGENT_MODE=foundry):  azure-ai-projects, azure-identity, openai
+# REST API (python -m app.api):       fastapi, uvicorn, pydantic (+ the Ollama-mode packages)
 #
 # Ollama itself is not a Python package: install it from https://ollama.com
 # and run `ollama pull qwen3:4b`. Tests use the standard-library unittest.
@@ -13,3 +14,7 @@ urllib3==2.8.0
 azure-ai-projects==2.10.0
 azure-identity==1.27.0
 openai==3.42.1
+fastapi==0.162.0
+uvicorn==0.54.0
+# Installed with fastapi; listed because app/api/schemas.py imports it directly.
+pydantic==2.14.2

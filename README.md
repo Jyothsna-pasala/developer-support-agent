@@ -1,5 +1,7 @@
 # Developer Support Agent: Local LLM Agent with Integrated Tools
 
+> **Web UI:** a React frontend for the REST API lives in [`frontend/`](frontend/README.md).
+
 A modular Python AI agent that helps developers with Python, React, TypeScript,
 REST API integration, troubleshooting and documentation. It's a learning
 project for the Microsoft Applied Skills credential **Develop an agent with

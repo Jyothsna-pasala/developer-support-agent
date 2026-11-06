@@ -340,8 +340,9 @@ server variable often holds a bind address such as `0.0.0.0`.
 
 ## 8. Tests
 
-`python -m unittest discover -s tests -t . -v` runs 144 tests in about 25 seconds. They need **no Ollama, no Azure and no internet**.
-The 5 live tests are skipped unless `OLLAMA_LIVE_TESTS=1`.
+`python -m unittest discover -s tests -t . -v` runs 198 tests in about 30 seconds. They need **no Ollama, no Azure and no internet**.
+The 5 live tests are skipped unless `OLLAMA_LIVE_TESTS=1`, and one provider
+contract check that doesn't apply to the rule-based backend is always skipped.
 
 | File | What it covers |
 |---|---|
@@ -354,6 +355,8 @@ The 5 live tests are skipped unless `OLLAMA_LIVE_TESTS=1`.
 | `test_foundry_agent.py` | Foundry request shapes with fake clients |
 | `test_api.py` | REST API over real HTTP (uvicorn in a thread + `requests`): full session flow, validation, 404/409/503, CORS, Swagger, model-driven tool call and fallback via `fake_ollama.py`, Foundry refused, `python -m app.api` startup |
 | `test_api_sessions.py` | Session manager without HTTP: isolation, expiry, limits, busy sessions, queue timeout (backend never called), delete during a turn; `API_*` settings validation |
+| `test_provider_contract.py` | The `AgentBackend` contract for the Local, Ollama (fake server) and Foundry (fake SDK) backends: replies, tool records, API and history shapes, errors, reset, close; `AGENT_MODE` selection; Foundry strict schemas for every tool; no Azure imports in `ollama`/`local` |
+| `test_rag_settings.py` | `RAG_*` settings validation (document search is not implemented yet) |
 
 The default suite mocks the model, so it proves the **plumbing** is correct.
 `test_ollama_live.py` checks that the real model actually calls the tools.
@@ -374,6 +377,54 @@ The default suite mocks the model, so it proves the **plumbing** is correct.
 
 The core skill is the same: define tools with clear descriptions and schemas,
 let the model choose, validate and execute safely, return results, and loop until done.
+
+### Providers (`AgentBackend`)
+
+Every provider implements one small interface, `AgentBackend` in
+`app/conversation.py`. The agent, sessions, REST API and frontend use only
+this interface, so they work the same with every provider:
+
+```python
+class AgentBackend(Protocol):
+    display_name: str                      # shown as "backend" in the API and UI
+    def generate_reply(self, user_input: str, history: ConversationHistory) -> AgentReply: ...
+    def reset(self) -> None: ...           # forget this conversation
+    def close(self) -> None: ...           # release clients and sessions
+```
+
+`AGENT_MODE` in `.env` (or `--mode`) selects the provider. `create_backend()`
+in `app/agent.py` builds it:
+
+| `AGENT_MODE` | Backend | Notes |
+|---|---|---|
+| `ollama` (default) | `OllamaAgentBackend`, wrapped in `FallbackBackend` | With `OLLAMA_FALLBACK_TO_RULES=true`, a failed turn is answered by the rule-based backend and the reply starts with `[LLM unavailable: ...]` |
+| `local` | `LocalSimulatedBackend` | Rule-based, no model, no network |
+| `foundry` | `FoundryAgentBackend` | CLI only. The REST API refuses this mode for now: each API session would create a new agent version in Azure |
+
+`app.foundry_agent` and the Azure SDK are imported only in `foundry` mode, so
+`ollama` and `local` need no Azure packages at runtime, no sign-in and no
+subscription.
+
+**Adding a provider.** Write a class with the four members above and add a
+branch for its mode in `create_backend()`. It must:
+
+- Run tools with `app.tools.execute_tool(registry, name, arguments)` and return
+  each call as a `ToolCallRecord(name, arguments, output)`, with `output` exactly
+  as `execute_tool` returned it. The API's `tool_calls` and the frontend's tool
+  cards use that shape.
+- Send tools to the model from the shared `ToolSpec` registry, so new tools
+  (such as future document search) reach every provider.
+- Report service failures as `AgentBackendError`, with a message that is safe to
+  show to users. A failed tool call is not a failure: it goes back to the model
+  and appears in the reply's records with `"ok": false`.
+- Keep its own conversation state (the agent also passes `history`, the
+  transcript), clear it in `reset()`, and release clients in `close()`.
+
+`tests/test_provider_contract.py` runs the same checks against the Local,
+Ollama (through `tests/fake_ollama.py`) and Foundry (through fake SDK clients)
+backends. A new provider should add one subclass of `BackendContract` there.
+The same file checks that every registered tool meets Foundry's strict
+function-schema rules, and that `ollama` and `local` never import the Azure SDK.
 
 ### Future Microsoft Foundry steps
 When you have an Azure subscription: create a Foundry project, deploy a

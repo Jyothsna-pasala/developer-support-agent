@@ -4,6 +4,7 @@
 # Ollama mode (AGENT_MODE=ollama):    python-dotenv, requests, urllib3
 # Foundry mode (AGENT_MODE=foundry):  azure-ai-projects, azure-identity, openai
 # REST API (python -m app.api):       fastapi, uvicorn, pydantic (+ the Ollama-mode packages)
+# Document search (RAG_ENABLED=true): psycopg, psycopg-pool, pypdf, python-docx, python-multipart
 #
 # Ollama itself is not a Python package: install it from https://ollama.com
 # and run `ollama pull qwen3:4b`. Tests use the standard-library unittest.
@@ -18,3 +19,16 @@ fastapi==0.162.0
 uvicorn==0.54.0
 # Installed with fastapi; listed because app/api/schemas.py imports it directly.
 pydantic==2.14.2
+
+# RAG: PostgreSQL + pgvector driver and connection pool. "binary" ships a
+# prebuilt libpq, so no PostgreSQL client install is needed.
+psycopg[binary,pool]==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
+# RAG: text extraction from uploaded PDF and DOCX files. pypdf 6.21.4 is newer
+# than the other pins because it fixes seven denial-of-service advisories in
+# 6.21.2 (infinite loops and memory exhaustion on crafted PDFs).
+pypdf==6.21.4
+python-docx==1.2.0
+# RAG: required by FastAPI for multipart file uploads (UploadFile).
+python-multipart==0.0.32

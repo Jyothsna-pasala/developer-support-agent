@@ -36,6 +36,9 @@ htmlcov/
 logs/
 *.log
 
+# Documents uploaded for RAG (RAG_STORAGE_DIR); they may be private.
+data/uploads/
+
 # Local LLM model binaries and caches (Ollama stores models outside the project)
 .ollama/
 models/
